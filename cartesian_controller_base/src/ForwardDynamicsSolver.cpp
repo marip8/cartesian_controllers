@@ -103,10 +103,7 @@ trajectory_msgs::msg::JointTrajectoryPoint ForwardDynamicsSolver::getJointContro
   {
     control_cmd.positions.push_back(m_current_positions(i));
     control_cmd.velocities.push_back(m_current_velocities(i));
-
-    // Accelerations should be left empty. Those values will be interpreted
-    // by most hardware joint drivers as max. tolerated values. As a
-    // consequence, the robot will move very slowly.
+    control_cmd.accelerations.push_back(m_current_accelerations(i));
   }
   control_cmd.time_from_start = period;  // valid for this duration
 
