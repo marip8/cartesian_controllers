@@ -229,10 +229,12 @@ CartesianControllerBase::on_configure(const rclcpp_lifecycle::State & previous_s
   }
   for (const auto & type : m_cmd_interface_types)
   {
-    if (type != hardware_interface::HW_IF_POSITION && type != hardware_interface::HW_IF_VELOCITY)
+    if (type != hardware_interface::HW_IF_POSITION &&
+        type != hardware_interface::HW_IF_VELOCITY &&
+        type != hardware_interface::HW_IF_ACCELERATION)
     {
       RCLCPP_ERROR(get_node()->get_logger(),
-                   "Unsupported command interface: %s. Choose position or velocity", type.c_str());
+                   "Unsupported command interface: %s. Choose position, velocity, and/or acceleration", type.c_str());
       return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
     }
   }
@@ -262,6 +264,7 @@ CartesianControllerBase::on_deactivate(const rclcpp_lifecycle::State & previous_
   {
     m_joint_cmd_pos_handles.clear();
     m_joint_cmd_vel_handles.clear();
+    m_joint_cmd_acc_handles.clear();
     m_joint_state_pos_handles.clear();
     this->release_interfaces();
     m_active = false;
@@ -280,15 +283,31 @@ CartesianControllerBase::on_activate(const rclcpp_lifecycle::State & previous_st
   // Get command handles.
   for (const auto & type : m_cmd_interface_types)
   {
-    if (!controller_interface::get_ordered_interfaces(command_interfaces_, m_joint_names, type,
-                                                      (type == hardware_interface::HW_IF_POSITION)
-                                                        ? m_joint_cmd_pos_handles
-                                                        : m_joint_cmd_vel_handles))
+    std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>>* interfaces;
+
+    if(type == hardware_interface::HW_IF_POSITION)
+    {
+      interfaces = &m_joint_cmd_pos_handles;
+    }
+    else if(type == hardware_interface::HW_IF_VELOCITY)
+    {
+      interfaces = &m_joint_cmd_vel_handles;
+    }
+    else if(type == hardware_interface::HW_IF_ACCELERATION)
+    {
+      interfaces = &m_joint_cmd_acc_handles;
+    }
+    else
+    {
+      RCLCPP_ERROR_STREAM(get_node()->get_logger(), "Invalid hardware interface type: " << type);
+      return CallbackReturn::ERROR;
+    }
+
+    if (!controller_interface::get_ordered_interfaces(command_interfaces_, m_joint_names, type, *interfaces))
     {
       RCLCPP_ERROR(get_node()->get_logger(), "Expected %zu '%s' command interfaces, got %zu.",
                    m_joint_names.size(), type.c_str(),
-                   (type == hardware_interface::HW_IF_POSITION) ? m_joint_cmd_pos_handles.size()
-                                                                : m_joint_cmd_vel_handles.size());
+                   interfaces->size());
       return CallbackReturn::ERROR;
     }
   }
@@ -329,6 +348,7 @@ CartesianControllerBase::on_shutdown(const rclcpp_lifecycle::State & previous_st
   {
     m_joint_cmd_pos_handles.clear();
     m_joint_cmd_vel_handles.clear();
+    m_joint_cmd_acc_handles.clear();
     m_joint_state_pos_handles.clear();
     this->release_interfaces();
     m_active = false;
@@ -379,6 +399,13 @@ void CartesianControllerBase::writeJointControlCmds()
       for (size_t i = 0; i < m_joint_names.size(); ++i)
       {
         m_joint_cmd_vel_handles[i].get().set_value(m_simulated_joint_motion.velocities[i]);
+      }
+    }
+    if (type == hardware_interface::HW_IF_ACCELERATION)
+    {
+      for (size_t i = 0; i < m_joint_names.size(); ++i)
+      {
+        m_joint_cmd_acc_handles[i].get().set_value(m_simulated_joint_motion.accelerations[i]);
       }
     }
   }
