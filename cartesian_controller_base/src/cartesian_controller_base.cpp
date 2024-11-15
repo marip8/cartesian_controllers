@@ -250,6 +250,11 @@ CartesianControllerBase::on_configure(const rclcpp_lifecycle::State & previous_s
       get_node()->create_publisher<geometry_msgs::msg::TwistStamped>(
         std::string(get_node()->get_name()) + "/current_twist", 3));
 
+  m_feedback_cmd_publisher =
+    std::make_shared<realtime_tools::RealtimePublisher<sensor_msgs::msg::JointState>>(
+      get_node()->create_publisher<sensor_msgs::msg::JointState>(
+        std::string(get_node()->get_name()) + "/current_cmd", 3));
+
   m_configured = true;
 
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
@@ -531,6 +536,17 @@ void CartesianControllerBase::publishStateFeedback()
     m_feedback_twist_publisher->msg_.twist.angular.z = twist[5];
 
     m_feedback_twist_publisher->unlockAndPublish();
+  }
+
+  if (m_feedback_cmd_publisher->trylock())
+  {
+    m_feedback_cmd_publisher->msg_.header.stamp = get_node()->now();
+    m_feedback_cmd_publisher->msg_.name = m_joint_names;
+    m_feedback_cmd_publisher->msg_.position = m_simulated_joint_motion.positions;
+    m_feedback_cmd_publisher->msg_.velocity = m_simulated_joint_motion.velocities;
+    m_feedback_cmd_publisher->msg_.effort = m_simulated_joint_motion.accelerations;
+
+    m_feedback_cmd_publisher->unlockAndPublish();
   }
 }
 

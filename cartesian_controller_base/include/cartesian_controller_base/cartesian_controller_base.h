@@ -58,6 +58,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <string>
 #include <trajectory_msgs/msg/joint_trajectory_point.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
 #include <vector>
 
 #include "ROS2VersionConfig.h"
@@ -223,6 +224,8 @@ private:
     m_feedback_pose_publisher;
   realtime_tools::RealtimePublisherSharedPtr<geometry_msgs::msg::TwistStamped>
     m_feedback_twist_publisher;
+  realtime_tools::RealtimePublisherSharedPtr<sensor_msgs::msg::JointState>
+    m_feedback_cmd_publisher;
 
   std::vector<std::string> m_cmd_interface_types;
   std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>>
