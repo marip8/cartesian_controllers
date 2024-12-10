@@ -39,6 +39,8 @@
 
 #include <cartesian_force_controller/cartesian_force_controller.h>
 
+#include <hardware_interface/types/hardware_interface_type_values.hpp>
+#include <controller_interface/helpers.hpp>
 #include <cmath>
 
 #include "cartesian_controller_base/Utility.h"
@@ -62,6 +64,7 @@ CartesianForceController::on_init()
 
   auto_declare<std::string>("ft_sensor_ref_link", "");
   auto_declare<bool>("hand_frame_control", true);
+  auto_declare<std::string>("ft_sensor", "");
 
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
@@ -93,21 +96,35 @@ CartesianForceController::on_configure(const rclcpp_lifecycle::State & previous_
     get_node()->get_name() + std::string("/target_wrench"), 10,
     std::bind(&CartesianForceController::targetWrenchCallback, this, std::placeholders::_1));
 
-  m_ft_sensor_wrench_subscriber =
-    get_node()->create_subscription<geometry_msgs::msg::WrenchStamped>(
-      get_node()->get_name() + std::string("/ft_sensor_wrench"), 10,
-      std::bind(&CartesianForceController::ftSensorWrenchCallback, this, std::placeholders::_1));
-
   m_target_wrench.setZero();
   m_ft_sensor_wrench.setZero();
 
+  // Initialize FTS semantic semantic_component
+  ft_sensor_ = std::make_unique<semantic_components::ForceTorqueSensor>(
+      semantic_components::ForceTorqueSensor(get_node()->get_parameter("ft_sensor").as_string()));
+
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+}
+
+controller_interface::InterfaceConfiguration CartesianForceController::state_interface_configuration() const
+{
+  controller_interface::InterfaceConfiguration conf = Base::state_interface_configuration();
+
+  auto ft_interfaces = ft_sensor_->get_state_interface_names();
+  conf.names.insert(conf.names.end(), ft_interfaces.begin(), ft_interfaces.end());
+
+  return conf;
 }
 
 rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
 CartesianForceController::on_activate(const rclcpp_lifecycle::State & previous_state)
 {
   Base::on_activate(previous_state);
+
+  // initialize interface of the FTS semantic component
+  if (!ft_sensor_->assign_loaned_state_interfaces(state_interfaces_))
+    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
 
@@ -115,6 +132,10 @@ rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
 CartesianForceController::on_deactivate(const rclcpp_lifecycle::State & previous_state)
 {
   Base::on_deactivate(previous_state);
+
+  // release force torque sensor interface
+  ft_sensor_->release_interfaces();
+
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
 }
 
@@ -153,6 +174,38 @@ ctrl::Vector6D CartesianForceController::computeForceError()
   else  // Default to robot base frame
   {
     target_wrench = m_target_wrench;
+  }
+
+  // Get the untransformed force/torque
+  const std::array<double, 3> force = ft_sensor_->get_forces();
+  const std::array<double, 3> torque = ft_sensor_->get_torques();
+
+  if (std::none_of(force.begin(), force.end(), [](const double val) { return std::isnan(val); }) &&
+      std::none_of(torque.begin(), torque.end(), [](const double val) { return std::isnan(val); }))
+  {
+    // Compute how the measured wrench appears in the frame of interest.
+    KDL::Wrench tmp;
+    tmp[0] = force[0];
+    tmp[1] = force[1];
+    tmp[2] = force[2];
+    tmp[3] = torque[0];
+    tmp[4] = torque[1];
+    tmp[5] = torque[2];
+    tmp = m_ft_sensor_transform * tmp;
+
+    // Convert to Vector6D
+    m_ft_sensor_wrench[0] = tmp[0];
+    m_ft_sensor_wrench[1] = tmp[1];
+    m_ft_sensor_wrench[2] = tmp[2];
+    m_ft_sensor_wrench[3] = tmp[3];
+    m_ft_sensor_wrench[4] = tmp[4];
+    m_ft_sensor_wrench[5] = tmp[5];
+  }
+  else
+  {
+    auto & clock = *get_node()->get_clock();
+    RCLCPP_WARN_STREAM_THROTTLE(get_node()->get_logger(), clock, 3000,
+                                "NaN detected in force-torque sensor wrench. Ignoring input.");
   }
 
   // Superimpose target wrench and sensor wrench in base frame
@@ -202,43 +255,6 @@ void CartesianForceController::targetWrenchCallback(
   m_target_wrench[3] = wrench->wrench.torque.x;
   m_target_wrench[4] = wrench->wrench.torque.y;
   m_target_wrench[5] = wrench->wrench.torque.z;
-}
-
-void CartesianForceController::ftSensorWrenchCallback(
-  const geometry_msgs::msg::WrenchStamped::SharedPtr wrench)
-{
-  if (!this->isActive())
-  {
-    return;
-  }
-
-  if (std::isnan(wrench->wrench.force.x) || std::isnan(wrench->wrench.force.y) ||
-      std::isnan(wrench->wrench.force.z) || std::isnan(wrench->wrench.torque.x) ||
-      std::isnan(wrench->wrench.torque.y) || std::isnan(wrench->wrench.torque.z))
-  {
-    auto & clock = *get_node()->get_clock();
-    RCLCPP_WARN_STREAM_THROTTLE(get_node()->get_logger(), clock, 3000,
-                                "NaN detected in force-torque sensor wrench. Ignoring input.");
-    return;
-  }
-
-  KDL::Wrench tmp;
-  tmp[0] = wrench->wrench.force.x;
-  tmp[1] = wrench->wrench.force.y;
-  tmp[2] = wrench->wrench.force.z;
-  tmp[3] = wrench->wrench.torque.x;
-  tmp[4] = wrench->wrench.torque.y;
-  tmp[5] = wrench->wrench.torque.z;
-
-  // Compute how the measured wrench appears in the frame of interest.
-  tmp = m_ft_sensor_transform * tmp;
-
-  m_ft_sensor_wrench[0] = tmp[0];
-  m_ft_sensor_wrench[1] = tmp[1];
-  m_ft_sensor_wrench[2] = tmp[2];
-  m_ft_sensor_wrench[3] = tmp[3];
-  m_ft_sensor_wrench[4] = tmp[4];
-  m_ft_sensor_wrench[5] = tmp[5];
 }
 
 }  // namespace cartesian_force_controller
