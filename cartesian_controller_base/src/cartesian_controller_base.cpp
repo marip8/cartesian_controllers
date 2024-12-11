@@ -62,10 +62,10 @@ CartesianControllerBase::command_interface_configuration() const
 {
   controller_interface::InterfaceConfiguration conf;
   conf.type = controller_interface::interface_configuration_type::INDIVIDUAL;
-  conf.names.reserve(m_joint_names.size() * m_cmd_interface_types.size());
+  conf.names.reserve(m_cmd_joint_names.size() * m_cmd_interface_types.size());
   for (const auto & type : m_cmd_interface_types)
   {
-    for (const auto & joint_name : m_joint_names)
+    for (const auto & joint_name : m_cmd_joint_names)
     {
       conf.names.push_back(joint_name + std::string("/").append(type));
     }
@@ -184,6 +184,27 @@ CartesianControllerBase::on_configure(const rclcpp_lifecycle::State & previous_s
     return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
   }
 
+  // Get names of actuated joints
+  if (get_node()->has_parameter("command_joints"))
+  {
+    m_cmd_joint_names = get_node()->get_parameter("command_joints").as_string_array();
+    if (m_cmd_joint_names.empty())
+    {
+      RCLCPP_ERROR(get_node()->get_logger(), "command joints array is empty");
+      return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+    }
+    if (m_cmd_joint_names.size() != m_joint_names.size())
+    {
+      RCLCPP_ERROR(get_node()->get_logger(), "command joints array is not the same size as the joints array");
+      return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+    }
+  }
+  else
+  {
+    RCLCPP_WARN(get_node()->get_logger(), "Parameter 'command_joints' not specified; using the specified 'joints' as the command interfaces");
+    m_cmd_joint_names = m_joint_names;
+  }
+
   // Parse joint limits
   KDL::JntArray upper_pos_limits(m_joint_names.size());
   KDL::JntArray lower_pos_limits(m_joint_names.size());
@@ -280,13 +301,13 @@ CartesianControllerBase::on_activate(const rclcpp_lifecycle::State & previous_st
   // Get command handles.
   for (const auto & type : m_cmd_interface_types)
   {
-    if (!controller_interface::get_ordered_interfaces(command_interfaces_, m_joint_names, type,
+    if (!controller_interface::get_ordered_interfaces(command_interfaces_, m_cmd_joint_names, type,
                                                       (type == hardware_interface::HW_IF_POSITION)
                                                         ? m_joint_cmd_pos_handles
                                                         : m_joint_cmd_vel_handles))
     {
       RCLCPP_ERROR(get_node()->get_logger(), "Expected %zu '%s' command interfaces, got %zu.",
-                   m_joint_names.size(), type.c_str(),
+                   m_cmd_joint_names.size(), type.c_str(),
                    (type == hardware_interface::HW_IF_POSITION) ? m_joint_cmd_pos_handles.size()
                                                                 : m_joint_cmd_vel_handles.size());
       return CallbackReturn::ERROR;
@@ -369,14 +390,14 @@ void CartesianControllerBase::writeJointControlCmds()
   {
     if (type == hardware_interface::HW_IF_POSITION)
     {
-      for (size_t i = 0; i < m_joint_names.size(); ++i)
+      for (size_t i = 0; i < m_cmd_joint_names.size(); ++i)
       {
         m_joint_cmd_pos_handles[i].get().set_value(m_simulated_joint_motion.positions[i]);
       }
     }
     if (type == hardware_interface::HW_IF_VELOCITY)
     {
-      for (size_t i = 0; i < m_joint_names.size(); ++i)
+      for (size_t i = 0; i < m_cmd_joint_names.size(); ++i)
       {
         m_joint_cmd_vel_handles[i].get().set_value(m_simulated_joint_motion.velocities[i]);
       }

@@ -231,6 +231,7 @@ private:
     m_joint_cmd_vel_handles;
 
   std::vector<std::string> m_joint_names;
+  std::vector<std::string> m_cmd_joint_names;
   trajectory_msgs::msg::JointTrajectoryPoint m_simulated_joint_motion;
   SpatialPDController m_spatial_controller;
   ctrl::Vector6D m_cartesian_input;
