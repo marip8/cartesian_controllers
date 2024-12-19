@@ -13,8 +13,8 @@ find_package(interactive_markers REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(tf2_eigen REQUIRED)
 find_package(urdf REQUIRED)
-
 
 # Convenience variable for dependencies
 set(THIS_PACKAGE_INCLUDE_DEPENDS
@@ -25,6 +25,7 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
         kdl_parser
         pluginlib
         rclcpp
+        tf2_eigen
         urdf
 )
 
@@ -38,6 +39,7 @@ ament_export_dependencies(
 
 add_library(${PROJECT_NAME} SHARED
   src/motion_control_handle.cpp
+  src/wrench_control_handle.cpp
 )
 
 target_include_directories(${PROJECT_NAME}

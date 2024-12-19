@@ -18,6 +18,7 @@
   <depend>kdl_parser</depend>
   <depend>pluginlib</depend>
   <depend>rclcpp</depend>
+  <depend>tf2_eigen</depend>
   <depend>urdf</depend>
 
   <export>
